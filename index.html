@@ -1,497 +1,113 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>중학교 과학 스마트 퀴즈 (MediaPipe Hand Tracking)</title>
+<!-- ... existing code ... -->
+                  {cameraActive && (
+                    <div className="absolute top-2 left-2 bg-slate-900/80 backdrop-blur px-2.5 py-1 rounded-lg border border-slate-700 text-xs text-indigo-300">
+                      감지 상태: <span className="font-bold text-white text-sm">{detectedFingers > 0 ? `${detectedFingers}번 영역 감지 중` : '대기 중'}</span>
+                    </div>
+                  )}
 
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
+                  <!-- 화면 4분할 타겟 오버레이 레이어 -->
+                  {cameraActive && (
+                    <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 pointer-events-none opacity-40">
+                      <div className="border border-dashed border-indigo-400/50 flex items-center justify-center font-bold text-indigo-300 text-lg">1</div>
+                      <div className="border border-dashed border-indigo-400/50 flex items-center justify-center font-bold text-indigo-300 text-lg">2</div>
+                      <div className="border border-dashed border-indigo-400/50 flex items-center justify-center font-bold text-indigo-300 text-lg">3</div>
+                      <div className="border border-dashed border-indigo-400/50 flex items-center justify-center font-bold text-indigo-300 text-lg">4</div>
+                    </div>
+                  )}
+                </div>
 
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
+                {cameraError && (
+<!-- ... existing code ... -->
+      // 브라우저 캔버스 기반 모션 분석 엔진 (4구역 민감도 센서 적용)
+      const startMotionDetection = () => {
+        const canvas = canvasRef.current || document.createElement('canvas');
+        canvas.width = 160;
+        canvas.height = 120;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-  <!-- React & ReactDOM -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+        const processFrame = () => {
+          if (videoRef.current && videoRef.current.readyState >= 2) {
+            ctx.drawImage(videoRef.current, 0, 0, 160, 120);
+            const frame = ctx.getImageData(0, 0, 160, 120);
 
-  <!-- Babel for JSX compilation -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+            if (prevFrameRef.current) {
+              const activeZone = getActiveZone(frame.data, prevFrameRef.current.data, 160, 120);
+              setDetectedFingers(activeZone);
 
-  <!-- MediaPipe Tasks Vision -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script>
+              if (!isSubmittedRef.current && activeZone >= 1 && activeZone <= 4) {
+                const targetIdx = activeZone - 1;
+                if (currentHoverRef.current !== targetIdx) {
+                  currentHoverRef.current = targetIdx;
+                  setHoveredOption(targetIdx);
+                  holdStartTimeRef.current = performance.now();
+                  setHoldProgress(0);
+                } else {
+                  if (holdStartTimeRef.current) {
+                    const elapsed = performance.now() - holdStartTimeRef.current;
+                    const progress = Math.min((elapsed / 1500) * 100, 100);
+                    setHoldProgress(progress);
 
-  <style>
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .animate-fadeIn {
-      animation: fadeIn 0.3s ease-out forwards;
-    }
-  </style>
-</head>
-<body class="bg-slate-900 text-slate-100 font-sans min-h-screen">
-  <div id="root"></div>
-
-  <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
-
-    const QUIZ_DATA = [
-      {
-        id: 1,
-        category: "물리",
-        question: "다음 중 빛의 합성에서 3원색(RGB)에 해당하지 않는 색은 무엇인가요?",
-        options: ["빨강 (Red)", "초록 (Green)", "파랑 (Blue)", "노랑 (Yellow)"],
-        answer: 3,
-        explanation: "빛의 3원색은 빨강, 초록, 파랑입니다. 노랑은 빨간색 빛과 초록색 빛을 합성했을 때 나타나는 색입니다."
-      },
-      {
-        id: 2,
-        category: "화학",
-        question: "물질의 상태 변화 중 '고체에서 기체'로 직접 변하는 현상을 무엇이라고 하나요?",
-        options: ["응고", "승화", "액화", "기화"],
-        answer: 1,
-        explanation: "고체가 액체를 거치지 않고 바로 기체로 변하거나, 반대로 기체가 고체로 변하는 현상을 '승화'라고 합니다."
-      },
-      {
-        id: 3,
-        category: "생물",
-        question: "식물이 빛에너지를 이용하여 유기물을 합성하고 산소를 발생시키는 작용은?",
-        options: ["호흡 작용", "광합성 작용", "증산 작용", "소화 작용"],
-        answer: 1,
-        explanation: "광합성은 엽록체에서 엽록소가 빛에너지를 흡수하여 물과 이산화탄소로부터 양분(포도당)과 산소를 만드는 과정입니다."
-      },
-      {
-        id: 4,
-        category: "지구과학",
-        question: "지구 내부 구조 중 가장 큰 부피를 차지하는 층은 어디인가요?",
-        options: ["지각", "맨틀", "외핵", "내핵"],
-        answer: 1,
-        explanation: "맨틀은 지각 아래부터 깊이 약 2,900km까지의 부분으로, 지구 전체 부피의 약 80% 이상을 차지합니다."
-      },
-      {
-        id: 5,
-        category: "물리",
-        question: "물체에 힘을 주어 힘의 방향으로 이동시켰을 때, 과학에서의 '일의 양(J)'을 구하는 공식을 옳게 나타낸 것은?",
-        options: ["힘의 크기 × 이동 거리", "질량 × 가속도", "힘의 크기 ÷ 이동 거리", "질량 × 높이 ÷ 시간"],
-        answer: 0,
-        explanation: "과학에서 일의 양(W)은 물체에 작용하는 힘의 크기(F)와 힘의 방향으로 이동한 거리(s)의 곱으로 구합니다. (W = F × s)"
-      },
-      {
-        id: 6,
-        category: "화학",
-        question: "원자가 전자를 잃거나 얻어서 전하를 띠게 된 입자를 무엇이라고 하나요?",
-        options: ["분자", "이온", "원소", "화합물"],
-        answer: 1,
-        explanation: "중성 상태의 원자가 전자를 잃으면 양이온(+), 전자를 얻으면 음이온(-)이 됩니다."
-      },
-      {
-        id: 7,
-        category: "생물",
-        question: "사람의 혈액 성분 중 체내에 침입한 병원체를 식균 작용으로 파괴하여 우리 몸을 보호하는 것은?",
-        options: ["적혈구", "백혈구", "혈소판", "혈장"],
-        answer: 1,
-        explanation: "백혈구는 식균 작용을 하여 식균 물질 및 병원체를 제거함으로써 면역 반응을 담당합니다."
-      },
-      {
-        id: 8,
-        category: "지구과학",
-        question: "달의 모양 변화 과정 중 지구에서 보았을 때 오른쪽 반만 밝게 보이는 달의 상은?",
-        options: ["초승달", "상현달", "하현달", "그믐달"],
-        answer: 1,
-        explanation: "음력 7~8일경에 관측되며 오른쪽 반이 밝게 보이는 달은 '상현달'입니다. (왼쪽 반이 밝은 것은 하현달)"
-      },
-      {
-        id: 9,
-        category: "물리",
-        question: "소리의 3요소(높낮이, 세기, 맵시) 중 파동의 '진동수(Frequency)'와 가장 직접적으로 관련된 요소는?",
-        options: ["소리의 크기", "소리의 높낮이", "소리의 맵시(음색)", "소리의 속도"],
-        answer: 1,
-        explanation: "진동수가 많을수록(높을수록) 고음(높은 소리)이 나고, 진동수가 적을수록 저음(낮은 소리)이 납니다."
-      },
-      {
-        id: 10,
-        category: "지구과학",
-        question: "대기권의 계층 중 수증기가 존재하며 기상 현상(비, 눈 등)이 발생하는 층은 어디인가요?",
-        options: ["대류권", "성층권", "중간권", "열권"],
-        answer: 0,
-        explanation: "대류권은 공기가 밀집되어 있고 수증기가 많아 대류 운동과 함께 구름, 비, 눈 등의 기상 현상이 일어납니다."
-      }
-    ];
-
-    function App() {
-      const [currentIdx, setCurrentIdx] = useState(0);
-      const [selectedOption, setSelectedOption] = useState(null);
-      const [isAnswerSubmitted, setIsAnswerSubmitted] = useState(false);
-      const [score, setScore] = useState(0);
-      const [userAnswers, setUserAnswers] = useState(Array(QUIZ_DATA.length).fill(null));
-      const [quizFinished, setQuizFinished] = useState(false);
-
-      const [detectedFingers, setDetectedFingers] = useState(0);
-      const [hoveredOption, setHoveredOption] = useState(null);
-      const [holdProgress, setHoldProgress] = useState(0);
-
-      const [cameraActive, setCameraActive] = useState(false);
-      const [cameraError, setCameraError] = useState(null);
-      const [isLoadingModel, setIsLoadingModel] = useState(true);
-
-      const videoRef = useRef(null);
-      const handLandmarkerRef = useRef(null);
-      const requestRef = useRef(null);
-      const holdStartTimeRef = useRef(null);
-      const currentHoverRef = useRef(null);
-      const isSubmittedRef = useRef(false);
-
-      useEffect(() => {
-        isSubmittedRef.current = isAnswerSubmitted;
-      }, [isAnswerSubmitted]);
-
-      useEffect(() => {
-        let isMounted = true;
-
-        const initMediaPipe = async () => {
-          try {
-            setIsLoadingModel(true);
-            if (!window.FilesetResolver || !window.HandLandmarker) {
-              await new Promise(res => setTimeout(res, 500));
-            }
-
-            const vision = await window.FilesetResolver.forVisionTasks(
-              "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-            );
-
-            if (!isMounted) return;
-
-            const handLandmarker = await window.HandLandmarker.createFromOptions(vision, {
-              baseOptions: {
-                modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-                delegate: "GPU"
-              },
-              runningMode: "VIDEO",
-              numHands: 1
-            });
-
-            if (isMounted) {
-              handLandmarkerRef.current = handLandmarker;
-              setIsLoadingModel(false);
-              startCamera();
-            }
-          } catch (err) {
-            console.error("MediaPipe Init Error:", err);
-            if (isMounted) {
-              setCameraError("손가락 인식 시스템을 불러오지 못했습니다. 마우스 클릭으로 문제를 푸실 수 있습니다.");
-              setIsLoadingModel(false);
-            }
-          }
-        };
-
-        initMediaPipe();
-
-        return () => {
-          isMounted = false;
-          stopCamera();
-        };
-      }, []);
-
-      const startCamera = async () => {
-        setCameraError(null);
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 640, height: 480, facingMode: "user" }
-          });
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.onloadedmetadata = () => {
-              videoRef.current.play();
-              setCameraActive(true);
-              startDetection();
-            };
-          }
-        } catch (err) {
-          console.warn("Camera Error:", err);
-          setCameraActive(false);
-          setCameraError("웹캠을 켤 수 없습니다. (권한 거부 또는 카메라 없음). 화면을 클릭해 선택하세요.");
-        }
-      };
-
-      const stopCamera = () => {
-        if (requestRef.current) cancelAnimationFrame(requestRef.current);
-        if (videoRef.current && videoRef.current.srcObject) {
-          videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-          videoRef.current.srcObject = null;
-        }
-        setCameraActive(false);
-      };
-
-      const countFingers = (landmarks) => {
-        if (!landmarks || landmarks.length < 21) return 0;
-        let count = 0;
-        if (Math.abs(landmarks[4].x - landmarks[2].x) > 0.05) count++;
-        if (landmarks[8].y < landmarks[6].y) count++;
-        if (landmarks[12].y < landmarks[10].y) count++;
-        if (landmarks[16].y < landmarks[14].y) count++;
-        if (landmarks[20].y < landmarks[18].y) count++;
-        return count;
-      };
-
-      const startDetection = () => {
-        let lastVideoTime = -1;
-        const detectFrame = () => {
-          if (videoRef.current && handLandmarkerRef.current && videoRef.current.readyState >= 2) {
-            if (videoRef.current.currentTime !== lastVideoTime) {
-              lastVideoTime = videoRef.current.currentTime;
-              const results = handLandmarkerRef.current.detectForVideo(videoRef.current, performance.now());
-
-              if (results.landmarks && results.landmarks.length > 0) {
-                const fingerCount = countFingers(results.landmarks[0]);
-                setDetectedFingers(fingerCount);
-
-                if (!isSubmittedRef.current && fingerCount >= 1 && fingerCount <= 4) {
-                  const targetIdx = fingerCount - 1;
-                  if (currentHoverRef.current !== targetIdx) {
-                    currentHoverRef.current = targetIdx;
-                    setHoveredOption(targetIdx);
-                    holdStartTimeRef.current = performance.now();
-                    setHoldProgress(0);
-                  } else {
-                    if (holdStartTimeRef.current) {
-                      const elapsed = performance.now() - holdStartTimeRef.current;
-                      const progress = Math.min((elapsed / 1500) * 100, 100);
-                      setHoldProgress(progress);
-
-                      if (elapsed >= 1500) {
-                        confirmAnswer(targetIdx);
-                        holdStartTimeRef.current = null;
-                        setHoldProgress(0);
-                      }
+                    if (elapsed >= 1500) {
+                      confirmAnswer(targetIdx);
+                      holdStartTimeRef.current = null;
+                      setHoldProgress(0);
                     }
                   }
-                } else {
-                  currentHoverRef.current = null;
-                  setHoveredOption(null);
-                  holdStartTimeRef.current = null;
-                  setHoldProgress(0);
                 }
               } else {
-                setDetectedFingers(0);
                 currentHoverRef.current = null;
                 setHoveredOption(null);
                 holdStartTimeRef.current = null;
                 setHoldProgress(0);
               }
             }
+            prevFrameRef.current = frame;
           }
-          requestRef.current = requestAnimationFrame(detectFrame);
+          requestRef.current = requestAnimationFrame(processFrame);
         };
-        requestRef.current = requestAnimationFrame(detectFrame);
+        requestRef.current = requestAnimationFrame(processFrame);
+      };
+
+      // 화면을 4분할(1, 2, 3, 4 영역)하여 움직임이 가장 크게 발생한 구역을 감지
+      const getActiveZone = (curr, prev, width, height) => {
+        const zones = [0, 0, 0, 0]; // Zone 1, 2, 3, 4
+        const halfW = width / 2;
+        const halfH = height / 2;
+
+        for (let y = 0; y < height; y += 4) {
+          for (let x = 0; x < width; x += 4) {
+            const i = (y * width + x) * 4;
+            const rDiff = Math.abs(curr[i] - prev[i]);
+            const gDiff = Math.abs(curr[i + 1] - prev[i + 1]);
+            const bDiff = Math.abs(curr[i + 2] - prev[i + 2]);
+
+            // 민감도 높임 (차이값 35 이상시 감지)
+            if (rDiff + gDiff + bDiff > 35) {
+              // 캔버스 좌우 반전(거울 모드) 적용 처리
+              const mirroredX = width - x;
+              let zoneIdx = 0;
+              if (mirroredX < halfW && y < halfH) zoneIdx = 0;      // 1번 (좌상)
+              else if (mirroredX >= halfW && y < halfH) zoneIdx = 1; // 2번 (우상)
+              else if (mirroredX < halfW && y >= halfH) zoneIdx = 2; // 3번 (좌하)
+              else zoneIdx = 3;                                       // 4번 (우하)
+
+              zones[zoneIdx]++;
+            }
+          }
+        }
+
+        let maxVal = 0;
+        let maxZone = 0;
+        zones.forEach((val, idx) => {
+          if (val > maxVal) {
+            maxVal = val;
+            maxZone = idx + 1;
+          }
+        });
+
+        // 일정 이상의 모션이 감지된 경우 해당 번호 반환
+        return maxVal > 15 ? maxZone : 0;
       };
 
       const confirmAnswer = (optionIdx) => {
-        if (isSubmittedRef.current) return;
-        setSelectedOption(optionIdx);
-        setIsAnswerSubmitted(true);
-
-        const isCorrect = optionIdx === QUIZ_DATA[currentIdx].answer;
-        if (isCorrect) setScore(prev => prev + 10);
-
-        const updated = [...userAnswers];
-        updated[currentIdx] = optionIdx;
-        setUserAnswers(updated);
-      };
-
-      const handleNextQuestion = () => {
-        if (currentIdx < QUIZ_DATA.length - 1) {
-          setCurrentIdx(prev => prev + 1);
-          setSelectedOption(null);
-          setIsAnswerSubmitted(false);
-          setHoveredOption(null);
-          setHoldProgress(0);
-          currentHoverRef.current = null;
-          holdStartTimeRef.current = null;
-        } else {
-          setQuizFinished(true);
-        }
-      };
-
-      const handleRestart = () => {
-        setCurrentIdx(0);
-        setSelectedOption(null);
-        setIsAnswerSubmitted(false);
-        setScore(0);
-        setUserAnswers(Array(QUIZ_DATA.length).fill(null));
-        setQuizFinished(false);
-        setHoveredOption(null);
-        setHoldProgress(0);
-        currentHoverRef.current = null;
-        holdStartTimeRef.current = null;
-      };
-
-      const currentQ = QUIZ_DATA[currentIdx];
-
-      return (
-        <div className="min-h-screen flex flex-col">
-          <header className="bg-slate-800/80 backdrop-blur border-b border-slate-700 sticky top-0 z-50">
-            <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg">
-                  <i data-lucide="sparkles" class="w-6 h-6"></i>
-                </div>
-                <div>
-                  <h1 className="text-lg font-bold text-white">중학교 과학 스마트 퀴즈</h1>
-                  <p className="text-xs text-slate-400">Hand-Gesture Interactive Web App</p>
-                </div>
-              </div>
-              <div className="flex items-center space-x-6">
-                <div className="text-right">
-                  <span className="text-xs text-slate-400 block">점수</span>
-                  <span className="text-xl font-extrabold text-amber-400">{score}점</span>
-                </div>
-                <div className="bg-slate-700/50 px-3 py-1.5 rounded-lg border border-slate-600 text-sm font-semibold">
-                  {currentIdx + 1} / {QUIZ_DATA.length}
-                </div>
-              </div>
-            </div>
-          </header>
-
-          <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <section className="lg:col-span-4 flex flex-col gap-4">
-              <div className="bg-slate-800 border border-slate-700 rounded-2xl p-4 shadow-xl flex flex-col items-center">
-                <div className="w-full flex items-center justify-between mb-3">
-                  <span className="text-sm font-medium flex items-center gap-1.5 text-slate-300">
-                    <i data-lucide="camera" class="w-4 h-4 text-indigo-400"></i> 웹캠 모니터
-                  </span>
-                  {cameraActive ? (
-                    <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
-                      감지 중
-                    </span>
-                  ) : (
-                    <span className="text-xs bg-rose-500/20 text-rose-400 px-2.5 py-0.5 rounded-full border border-rose-500/30">
-                      비활성
-                    </span>
-                  )}
-                </div>
-
-                <div className="relative w-full aspect-video bg-slate-950 rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
-                  <video ref={videoRef} className="w-full h-full object-cover scale-x-[-1]" playsInline muted />
-                  {!cameraActive && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-slate-900/90 text-center">
-                      <i data-lucide="camera-off" class="w-8 h-8 text-slate-500 mb-2"></i>
-                      <p className="text-xs text-slate-400">
-                        {isLoadingModel ? "인식 모델을 불러오는 중..." : "카메라를 연결할 수 없습니다. 마우스로 보기를 선택하세요."}
-                      </p>
-                    </div>
-                  )}
-                  {cameraActive && (
-                    <div className="absolute top-2 left-2 bg-slate-900/80 backdrop-blur px-2.5 py-1 rounded-lg border border-slate-700 text-xs text-indigo-300">
-                      손가락: <span className="font-bold text-white text-sm">{detectedFingers}</span>개
-                    </div>
-                  )}
-                </div>
-
-                {cameraError && (
-                  <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300">
-                    {cameraError}
-                  </div>
-                )}
-
-                <div className="w-full mt-4 bg-slate-900/50 rounded-xl p-3 border border-slate-700/50 text-xs space-y-2">
-                  <div className="font-semibold text-indigo-300">💡 사용 안내</div>
-                  <ul className="text-slate-400 space-y-1 list-disc list-inside">
-                    <li>손가락 <strong className="text-slate-200">1~4개</strong>를 카메라에 보입니다.</li>
-                    <li>지정한 보기가 <strong className="text-amber-400">1.5초 유지</strong>되면 선택됩니다.</li>
-                  </ul>
-                </div>
-              </div>
-            </section>
-
-            <section className="lg:col-span-8 flex flex-col">
-              {!quizFinished ? (
-                <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl flex-1 flex flex-col justify-between">
-                  <div>
-                    <div className="flex justify-between items-center mb-4">
-                      <span className="bg-indigo-500/20 text-indigo-300 text-xs font-semibold px-3 py-1 rounded-full border border-indigo-500/30">
-                        {currentQ.category}
-                      </span>
-                      <div className="w-1/3 bg-slate-700 h-2 rounded-full overflow-hidden">
-                        <div className="bg-indigo-500 h-full transition-all duration-300" style={{ width: `${((currentIdx + 1) / QUIZ_DATA.length) * 100}%` }} />
-                      </div>
-                    </div>
-
-                    <h2 className="text-xl md:text-2xl font-bold text-white mb-6">
-                      Q{currentQ.id}. {currentQ.question}
-                    </h2>
-
-                    <div className="space-y-3.5 mb-6">
-                      {currentQ.options.map((option, idx) => {
-                        const isHovered = hoveredOption === idx;
-                        const isSelected = selectedOption === idx;
-                        const isCorrect = currentQ.answer === idx;
-
-                        let btnStyle = "bg-slate-700/40 border-slate-600/60 text-slate-200 hover:bg-slate-700/80";
-                        if (isAnswerSubmitted) {
-                          if (isCorrect) btnStyle = "bg-emerald-500/20 border-emerald-500 text-emerald-200 font-bold";
-                          else if (isSelected && !isCorrect) btnStyle = "bg-rose-500/20 border-rose-500 text-rose-200";
-                          else btnStyle = "bg-slate-800/40 border-slate-700 text-slate-500 opacity-60";
-                        } else if (isHovered) {
-                          btnStyle = "bg-indigo-600/30 border-indigo-400 text-white shadow-lg scale-[1.01]";
-                        }
-
-                        return (
-                          <button
-                            key={idx}
-                            onClick={() => confirmAnswer(idx)}
-                            disabled={isAnswerSubmitted}
-                            className={`relative w-full p-4 rounded-xl border text-left flex items-center justify-between transition-all ${btnStyle}`}
-                          >
-                            <div className="flex items-center space-x-3.5 z-10">
-                              <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${isHovered ? "bg-indigo-500 text-white" : "bg-slate-700 text-slate-300"}`}>
-                                {idx + 1}
-                              </span>
-                              <span className="text-base font-medium">{option}</span>
-                            </div>
-
-                            {!isAnswerSubmitted && isHovered && (
-                              <div className="absolute left-0 top-0 bottom-0 bg-indigo-500/20 rounded-xl transition-all" style={{ width: `${holdProgress}%` }} />
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {isAnswerSubmitted && (
-                      <div className="bg-slate-900/80 border border-slate-700 rounded-xl p-4 animate-fadeIn">
-                        <div className="text-sm font-semibold mb-1 text-indigo-300">📖 정답 해설</div>
-                        <p className="text-xs md:text-sm text-slate-300">{currentQ.explanation}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {isAnswerSubmitted && (
-                    <div className="mt-6 flex justify-end">
-                      <button onClick={handleNextQuestion} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg flex items-center gap-2">
-                        {currentIdx < QUIZ_DATA.length - 1 ? "다음 문제" : "결과 보기"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-xl text-center flex flex-col items-center justify-center flex-1">
-                  <h2 className="text-2xl font-bold text-white mb-2">퀴즈 완료!</h2>
-                  <div className="text-5xl font-extrabold text-amber-400 my-4">{score}점</div>
-                  <button onClick={handleRestart} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg">
-                    다시 풀어보기
-                  </button>
-                </div>
-              )}
-            </section>
-          </main>
-        </div>
-      );
-    }
-
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-    setTimeout(() => { lucide.createIcons(); }, 500);
-  </script>
-</body>
-</html>
+<!-- ... existing code ... -->
